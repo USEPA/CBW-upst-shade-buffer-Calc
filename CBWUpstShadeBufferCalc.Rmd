@@ -1,0 +1,485 @@
+---
+title: "Upstream Shade Buffer Calculations for Regional Temperature Modeling"
+author: "Craig Connolly, EPA ORD-CEMM-ACESD, connolly.craig@epa.gov"
+date: "2025-June-2"
+output:
+  html_document:
+    df_print: paged
+    theme: spacelab
+    toc: yes
+    toc_float: yes
+  pdf_document:
+    toc: yes
+---
+
+```{r global_options, eval=FALSE, include=FALSE}
+knitr::opts_chunk$set(warning=FALSE, message=FALSE, echo = FALSE)
+```
+
+## Setup
+
+### Install R Packages 
+
+```{r, eval=F, warning=FALSE, message=FALSE}
+install.packages("tidyverse")
+install.packages("sf")
+install.packages("nhdplusTools")
+install.packages("data.table")
+install.packages("lwgeom")
+install.packages("beepr")
+install.packages("foreach")
+install.packages("doParallel")
+install.packages("parallel")
+install.packages("tictoc")
+```
+
+<br/>
+
+### Load R Libraries
+
+```{r, eval=F, warning=FALSE, message=FALSE}
+library(tidyverse)
+library(sf)
+library(nhdplusTools)
+library(data.table)
+library(lwgeom)
+library(beepr)
+library(units)
+library(tidygraph)
+library(parallel)
+library(doParallel)
+library(foreach)
+library(igraph)
+library(tictoc)
+```
+
+<br/>
+
+### Import Files
+
+Download NHDPlusHR files to local drive. This only needs to be run once.
+
+```{r, eval=F, warning=FALSE, message=FALSE}
+#download_nhdplushr("./nhdplushr", c("0205", "0206", "0207", "0208"), download_files = TRUE)
+```
+
+<br/>
+
+Import NHDPlusHR files and transform the NHDFlowline dataset to NAD Conus Albers.
+
+```{r, eval=F, warning=FALSE, message=FALSE}
+NHDPlusHR_files <- list.files(path = "./nhdplushr/02", pattern = ".gdb", full.names = TRUE)
+
+NHDPlusFlowlineVAA <- NHDPlusHR_files %>% lapply(st_read, layer = "NHDPlusFlowlineVAA") %>% bind_rows()
+
+NHDPlusEROMMA <- NHDPlusHR_files %>% lapply(st_read, layer = "NHDPlusEROMMA") %>% bind_rows()
+
+NHDFlowline <- 
+  NHDPlusHR_files %>% 
+  lapply(st_read, layer = "NHDFlowline") %>% 
+  bind_rows() %>% 
+  filter(innetwork == 1) %>% 
+  rowid_to_column("line_row_id") %>% 
+  st_transform(crs = 5070) %>%  
+  st_zm()
+```
+
+<br/>
+
+Remove minor (diverging) flowlines.
+
+```{r, eval=F, warning=FALSE, message=FALSE}
+main_NHDFlowline <-
+  NHDFlowline %>%
+  left_join(NHDPlusFlowlineVAA %>% select(c(divergence, nhdplusid, frommeas, tomeas, pathlength)), by = "nhdplusid") %>%
+  filter(!divergence == 2) %>%
+  select(-c(divergence, line_row_id))
+```
+
+<br/>
+
+Import observation and/or prediction site information.
+
+```{r, eval=F, warning=FALSE, message=FALSE}
+sites_sf <- st_read("./data/site_info_df_st_sf/site_info_df_st_sf.shp")
+
+colnames(sites_sf) <- 
+  c("Source", 
+    "Site_Identifier", 
+    "Site_Name", 
+    "Site_Type", 
+    "Latitude_DD", 
+    "Longitude_DD", 
+    "Coordinate_Datum", 
+    "Water_Quality_Indicator", 
+    "ReachCode", 
+    "Measure", 
+    "Public", 
+    "geometry")
+```
+
+<br/>
+
+Import RShade output files.
+
+```{r, eval=F, warning=FALSE, message=FALSE}
+July_output <- 
+  rbind(
+    do.call(rbind, lapply(list.files(path = "./data/RShade Output/July/HUC0205/", full.names = TRUE), fread)) %>% 
+      mutate(HUC = 0205),
+    fread("./data/RShade Output/July/HUC0206/RShade0206_Output7.csv") %>% mutate(HUC = 0206),
+    fread("./data/RShade Output/July/HUC0207/RShade0207_Output7.csv") %>% mutate(HUC = 0207),
+    do.call(rbind, lapply(list.files(path = "./data/RShade Output/July/HUC0208/", full.names = TRUE), fread)) %>% 
+      mutate(HUC = 0208)) %>%
+  mutate(Month = "July")
+
+August_output <- 
+  rbind(
+    do.call(rbind, lapply(list.files(path = "./data/RShade Output/August/HUC0205/", full.names = TRUE), fread)) %>% 
+      mutate(HUC = 0205),
+    fread("./data/RShade Output/August/HUC0206/RShade_Output_HUC0206_extop1.csv") %>% mutate(HUC = 0206),
+    fread("./data/RShade Output/August/HUC0207/RShade_Output.csv") %>% mutate(HUC = 0207),
+    do.call(rbind, lapply(list.files(path = "./data/RShade Output/August/HUC0208/", full.names = TRUE), fread)) %>% 
+      mutate(HUC = 0208)) %>%
+  mutate(Month = "August")
+
+Sept_output <- 
+  rbind(
+    do.call(rbind, lapply(list.files(path = "./data/RShade Output/September/HUC0205/", full.names = TRUE), fread)) %>% 
+      mutate(HUC = 0205),
+    fread("./data/RShade Output/September/HUC0206/RShade0206_Output9.csv") %>% mutate(HUC = 0206),
+    fread("./data/RShade Output/September/HUC0207/RShade0207_Output9.csv") %>% mutate(HUC = 0207),
+    do.call(rbind, lapply(list.files(path = "./data/RShade Output/September/HUC0208/", full.names = TRUE), fread)) %>% 
+      mutate(HUC = 0208)) %>%
+  mutate(Month = "September")
+
+shade_output <- rbind(July_output, August_output, Sept_output)
+
+rm(July_output, August_output, Sept_output)
+```
+
+<br/>
+
+Import RShade preprocessing files.
+
+Note, the geometry is in NAD Conus Albers (EPSG:5070) and the lat/long are in NAD83 (EPSG:4269).
+
+```{r, eval=F, warning=FALSE, message=FALSE}
+shade_coords <- readRDS("./data/RShade Preprocessing/test/HUC0205/Output_0205.RDS") %>% select(site_id) %>% mutate(HUC = 0205) 
+
+shade_coords <- 
+  rbind(
+    shade_coords,
+    rbind(
+      fread("./data/RShade Preprocessing/test/HUC0206/Output.csv") %>% mutate(HUC = 0206),
+      fread("./data/RShade Preprocessing/test/HUC0207/Output.csv") %>% mutate(HUC = 0207),
+      fread("./data/RShade Preprocessing/test/HUC0208/Output.csv") %>% mutate(HUC = 0208)) %>%
+      select(HUC, site_id, geometry) %>% 
+      separate(geometry, into = c("X", "Y"), sep = ",") %>%
+      mutate(X = as.numeric(gsub("[^0-9.]", "", X)),
+             Y = as.numeric(gsub("[^0-9.]", "", Y))) %>% 
+      st_as_sf(coords = c("X", "Y"), crs = 5070) 
+    )
+```
+
+<br/>
+
+## NHDPlus High Resolution Indexing
+
+### Index Observation/Prediction Points to NHDPlusHR Flowline Network
+
+Index snapped observation-prediction points to the NHDPlusHR flowline segments.
+
+```{r, eval=F, warning=FALSE, message=FALSE}
+sites_sf <- st_transform(sites_sf, crs = st_crs(main_NHDFlowline))
+sites_sf$id <- seq_len(nrow(sites_sf)) 
+
+site_fl_index <- get_flowline_index(main_NHDFlowline, sites_sf, precision = 0.1)
+
+site_fl_index <- 
+  site_fl_index %>% 
+  select(nhdplusid = COMID, reachcode = REACHCODE, reach_meas = REACH_meas, id) %>% 
+  left_join(as.data.frame(sites_sf) %>% select(Site_Identifier, id), by = "id") %>% 
+  select(-id)
+```
+
+<br/>
+
+### Index Shade Points to NHDPlusHR Flowline Network
+
+Index shade points to the NHDPlusHR flowline segments.
+
+Here we remove shade points along minor (braided) flowlines that diverge and reconnect with their main path.
+
+```{r, eval=F, warning=FALSE, message=FALSE}
+shade_fl_nearest <- st_nearest_feature(shade_coords, NHDFlowline) %>% as.data.frame() %>% rename(line_row_id = ".")
+
+shade_fl_nearest <- 
+  cbind(
+    shade_coords %>% as.data.frame %>% select(HUC, site_id),
+    shade_fl_nearest) %>% 
+  left_join(NHDFlowline %>% as.data.frame() %>% select(line_row_id , nhdplusid), by = "line_row_id") %>%
+  select(-line_row_id)
+
+shade_coords <- 
+  shade_coords %>% 
+  left_join(shade_fl_nearest, by = c("HUC", "site_id")) %>%
+  left_join(NHDPlusFlowlineVAA %>% select(c(divergence, nhdplusid)), by = "nhdplusid") %>%
+  filter(!divergence == 2) %>%
+  select(-divergence)
+
+upst_fls <- 
+  foreach(i = 1:nrow(site_fl_index), .combine = rbind) %do% {
+    site_input <- site_fl_index[i, ]
+    fls <- get_UT(NHDPlusFlowlineVAA, site_input$nhdplusid)
+    fls <- as.data.frame(fls)
+    colnames(fls) <- "nhdplusid"
+    return(fls)}
+
+upst_fls <- unique(upst_fls)
+
+upst_NHDFlowline <- main_NHDFlowline %>% filter(nhdplusid %in% upst_fls$nhdplusid)
+shade_coords <- shade_coords %>% filter(nhdplusid %in% upst_NHDFlowline$nhdplusid)
+
+rowClusters <- split(shade_coords, rep(1:ceiling(nrow(shade_coords)/500), each=500, length.out=nrow(shade_coords))) 
+
+add_row_ids <- 
+  function(data) {
+    data$id <- seq_len(nrow(data)) 
+    return(data)}
+
+rowClusters <- lapply(rowClusters, add_row_ids)
+
+numCores <- 12
+cl <- makeCluster(numCores)
+registerDoParallel(cl)
+
+shade_fl_index <- 
+  foreach(cluster = rowClusters, .combine = rbind, .packages = loadedNamespaces()) %dopar% {
+    index <- get_flowline_index(upst_NHDFlowline, cluster, precision = 0.1)
+    left_join(as.data.frame(cluster) %>% select(c(id, site_id, HUC)), index, by = "id")}
+
+stopCluster(cl)
+
+beep()
+
+shade_fl_index <- 
+  shade_fl_index %>% 
+  select(site_id, HUC, nhdplusid = COMID, reachcode = REACHCODE, reach_meas = REACH_meas)
+
+shade_wo_index <- shade_fl_index %>% filter(reach_meas %in% NA)
+
+shade_fl_index <- shade_fl_index %>% drop_na(reach_meas)
+
+#write.csv(shade_fl_index, "./data/shade_fl_index.csv")
+#shade_fl_index <- read.csv("./data/shade_fl_index.csv")
+```
+
+<br/>
+
+### Index of Downstream Flowline Travel Times
+
+Estimate the downstream travel time of the main NHDFlowlines, similar to the pathlength for distance.
+
+```{r, eval=F, warning=FALSE, message=FALSE}
+fl_times <-
+  main_NHDFlowline %>%
+  as.data.frame() %>%
+  select(c(lengthkm, nhdplusid)) %>% 
+  left_join(NHDPlusFlowlineVAA, by = "nhdplusid") %>%
+  left_join(NHDPlusEROMMA %>% select(c(vema, nhdplusid)), by = "nhdplusid") %>%
+  mutate(vema = replace(vema, vema < 0, 0),
+         fl_time_hrs = ((lengthkm*1000)/(vema*0.3048))/3600) %>% 
+  mutate(fl_time_hrs = ifelse(is.infinite(fl_time_hrs), 0, fl_time_hrs))
+
+sum_dwnst_travel <- function(id, net) {
+  dwnst_fls <- get_DM(net, id)
+  dwnst_fls <- dwnst_fls[dwnst_fls != id]
+  time <- sum((net %>% filter(nhdplusid %in% dwnst_fls))$fl_time_hrs)
+  return(time)}
+
+rowClusters <- split(fl_times, rep(1:ceiling(nrow(fl_times)/500), each=500, length.out=nrow(fl_times))) 
+
+numCores <- 24
+cl <- makeCluster(numCores)
+registerDoParallel(cl)
+
+dwnst_fl_travel <-
+  foreach(cluster = rowClusters, .combine = rbind, .packages = loadedNamespaces()) %dopar% {
+    cluster %>% 
+      mutate(dwnst_fl_travel = sapply(nhdplusid, sum_dwnst_travel, fl_times)) %>%
+      select(c(nhdplusid, dwnst_fl_travel))}
+
+stopCluster(cl)
+
+beep()
+
+#write.csv(dwnst_fl_travel, "./data/dwnst_fl_travel.csv")
+#dwnst_fl_travel <- read.csv("./data/dwnst_fl_travel.csv")
+
+rm(fl_times)
+```
+
+<br/>
+
+## Upstream Effective Shade
+
+### Estimate Observation/Prediction Point Distance and Travel Times on Flowline
+
+Estimate the distance and travel time from the prediction/observation point to the outlet.
+
+```{r, eval=F, warning=FALSE, message=FALSE}
+site_index <- 
+  site_fl_index %>%
+  left_join(as.data.frame(main_NHDFlowline) %>% select(lengthkm, nhdplusid, frommeas, tomeas, pathlength), by = "nhdplusid") %>%
+  mutate(dist_site_flbot_m = ((reach_meas-frommeas)/(tomeas-frommeas)*lengthkm)*1000,
+         dist_site_outlet_km = pathlength + dist_site_flbot_m/1000) %>%
+  left_join(NHDPlusEROMMA %>% select(c(vema, nhdplusid)), by = "nhdplusid") %>%
+  mutate(vema = replace(vema, vema < 0, 0),
+         time_site_flbot_hrs = (dist_site_flbot_m/(vema*0.3048))/3600) %>% 
+  mutate(time_site_flbot_hrs = ifelse(is.infinite(time_site_flbot_hrs), 0, time_site_flbot_hrs)) %>%
+  select(c(Site_Identifier, nhdplusid, dist_site_outlet_km, time_site_flbot_hrs)) %>%
+  left_join(dwnst_fl_travel, by = "nhdplusid") %>%
+  mutate(time_site_outlet_hrs = dwnst_fl_travel + time_site_flbot_hrs)
+```
+
+<br/>
+
+### Estimate Shade Point Distance and Travel Times on Flowline
+
+Estimate distance from shade points to the outlet and travel times from the shade point to its flowline bottom.
+
+```{r, eval=F, warning=FALSE, message=FALSE}
+shade_index <-
+  shade_fl_index %>%
+  left_join(as.data.frame(main_NHDFlowline) %>% select(lengthkm, nhdplusid, frommeas, tomeas, pathlength), by = "nhdplusid") %>%
+  mutate(dist_shade_flbot_m = ((reach_meas-frommeas)/(tomeas-frommeas)*lengthkm)*1000,
+         dist_shade_outlet_km = pathlength + dist_shade_flbot_m/1000) %>%
+  left_join(NHDPlusEROMMA %>% select(c(vema, nhdplusid)), by = "nhdplusid") %>%
+  mutate(vema = replace(vema, vema < 0, 0),
+         time_shade_flbot_hrs = (dist_shade_flbot_m/(vema*0.3048))/3600) %>% 
+  mutate(time_shade_flbot_hrs = ifelse(is.infinite(time_shade_flbot_hrs), 0, time_shade_flbot_hrs)) %>%
+  select(c(HUC, site_id, nhdplusid, dist_shade_flbot_m, dist_shade_outlet_km, time_shade_flbot_hrs))
+```
+
+<br/>
+
+### Create Upstream Shade Integration Function
+
+A portion of the code (lines 431-450) can be modified so that thresholds which meet their ceiling are changed to NA.
+
+```{r, eval=F, warning=FALSE, message=FALSE}
+calc_integrated_shade <- function(site_input) {
+  
+  # identify all upstream flowlines for site
+  upst_fl_ids <- get_UT(NHDPlusFlowlineVAA, site_input$nhdplusid)
+  
+  # filter shade point distance and travel times on upstream flowline
+  shade_att <- shade_index %>% filter(nhdplusid %in% upst_fl_ids)
+  
+  # calculate upstream distance for shade points
+  shade_att <- 
+    shade_att %>% 
+    mutate(dist_m = (dist_shade_outlet_km - site_input$dist_site_outlet_km)*1000) %>%
+    filter(dist_m >= 0)
+             
+  # calculate upstream travel time to shade points from site
+  shade_att <-
+    shade_att %>%
+    left_join(dwnst_fl_travel, by = "nhdplusid") %>%
+    mutate(travel_time_hrs = (dwnst_fl_travel + time_shade_flbot_hrs)-site_input$time_site_outlet_hrs)
+  
+  # join shade point output values
+  shade_att <-
+    shade_att %>%
+    left_join(shade_output, by = c("HUC", "site_id"))
+  
+  # estimate average effective shade
+  shade_att <-
+    shade_att %>% 
+    mutate(upst_1km  =  case_when(dist_m <= 1000 ~ effshd_TV),
+           upst_2km  =  case_when(dist_m <= 2000 ~ effshd_TV),
+           upst_3km  =  case_when(dist_m <= 3000 ~ effshd_TV),
+           upst_4km  =  case_when(dist_m <= 4000 ~ effshd_TV),
+           upst_5km  =  case_when(dist_m <= 5000 ~ effshd_TV),
+           upst_10km  = case_when(dist_m <= 10000 ~ effshd_TV),
+           upst_1hr  =  case_when(travel_time_hrs <= 1 ~ effshd_TV),
+           upst_2hr  =  case_when(travel_time_hrs <= 2 ~ effshd_TV),
+           upst_3hr  =  case_when(travel_time_hrs <= 3 ~ effshd_TV),
+           upst_4hr  =  case_when(travel_time_hrs <= 4 ~ effshd_TV),
+           upst_5hr  =  case_when(travel_time_hrs <= 5 ~ effshd_TV),
+           upst_6hr  =  case_when(travel_time_hrs <= 6 ~ effshd_TV),
+           upst_12hr  =  case_when(travel_time_hrs <= 12 ~ effshd_TV),
+           upst_24hr  =  case_when(travel_time_hrs <= 24 ~ effshd_TV),
+           upst_1000hr  =  case_when(travel_time_hrs <= 1000 ~ effshd_TV))
+  
+  
+separate_calc_months <- function(month, shade_att, site_input) {
+  
+   month <- month[[1]]
+  
+  # calculate average shade across distance and travel time thresholds
+  results <-
+    shade_att %>%
+    filter(Month %in% month) %>% 
+    summarize(across(contains("upst"), mean, na.rm = TRUE, .names = "{col}")) %>%
+    mutate(Site_Identifier = site_input$Site_Identifier,
+           Month = month) %>% 
+    select(Site_Identifier, Month, everything())
+  
+  # identify thresholds that hit their shade point ceiling
+  #n_shade <- colSums(!is.na(shade_att))
+  #n_shade <- data.frame(col = names(n_shade), n = n_shade)
+  #n_shade <- n_shade %>% filter(grepl("upst", col)) %>% pivot_wider(names_from = col, values_from = n)
+  
+  # replace thresholds that met their ceiling with NA after first occurrence. 
+  #results <-
+    #results %>%
+    #mutate(upst_2km = ifelse(n_shade$upst_2km == n_shade$upst_1km, NA, upst_2km),
+           #upst_3km = ifelse(n_shade$upst_3km == n_shade$upst_2km, NA, upst_3km),
+           #upst_4km = ifelse(n_shade$upst_4km == n_shade$upst_3km, NA, upst_4km),
+           #upst_5km = ifelse(n_shade$upst_5km == n_shade$upst_4km, NA, upst_5km),
+           #upst_10km = ifelse(n_shade$upst_10km == n_shade$upst_5km, NA, upst_10km),
+           #upst_2hr = ifelse(n_shade$upst_2hr == n_shade$upst_1hr, NA, upst_2hr),
+           #upst_3hr = ifelse(n_shade$upst_3hr == n_shade$upst_2hr, NA, upst_3hr),
+           #upst_4hr = ifelse(n_shade$upst_4hr == n_shade$upst_3hr, NA, upst_4hr),
+           #upst_5hr = ifelse(n_shade$upst_5hr == n_shade$upst_4hr, NA, upst_5hr),
+           #upst_6hr = ifelse(n_shade$upst_6hr == n_shade$upst_5hr, NA, upst_6hr),
+           #upst_12hr = ifelse(n_shade$upst_12hr == n_shade$upst_6hr, NA, upst_12hr),
+           #upst_24hr = ifelse(n_shade$upst_24hr == n_shade$upst_12hr, NA, upst_24hr),
+           #upst_1000hr = ifelse(n_shade$upst_1000hr == n_shade$upst_24hr, NA, upst_1000hr))
+  
+  return(results)
+  
+}
+
+results <- rbindlist(lapply(list("July", "August", "September"), separate_calc_months, shade_att, site_input))
+
+return(results)
+  
+}
+```
+
+<br/>
+
+### Calculate Upstream Shade
+
+Implement parallel processing to speed up the function. 
+
+```{r, eval=F, warning=FALSE, message=FALSE}
+#numCores <- detectCores() - 6
+numCores <- 12
+cl <- makeCluster(numCores)
+registerDoParallel(cl)
+
+shade_val_df <- 
+  foreach(i = 1:nrow(site_index), .combine = rbind, .packages = loadedNamespaces()) %dopar% {
+    site <- site_index[i, ]
+    calc_integrated_shade(site)}
+
+stopCluster(cl)
+
+shade_val_df <- shade_val_df %>% arrange(Month, Site_Identifier)
+
+#write.csv(shade_val_df, "./results/effshd_TV_values_df.csv")
+```
