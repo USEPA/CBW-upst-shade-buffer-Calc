@@ -1,7 +1,7 @@
 ---
 title: "Upstream Shade Buffer Calculations for Regional Temperature Modeling"
 author: "Craig Connolly, EPA ORD-CEMM-ACESD, connolly.craig@epa.gov"
-date: "2025-June-2"
+date: "2025-June-3"
 output:
   html_document:
     df_print: paged
@@ -250,7 +250,7 @@ add_row_ids <-
 
 rowClusters <- lapply(rowClusters, add_row_ids)
 
-numCores <- 12
+numCores <- 4
 cl <- makeCluster(numCores)
 registerDoParallel(cl)
 
