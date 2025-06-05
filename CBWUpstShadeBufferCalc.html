@@ -2899,15 +2899,15 @@ rm(July_output, August_output, Sept_output)</code></pre>
 <p>Import RShade preprocessing files.</p>
 <p>Note, the geometry is in NAD Conus Albers (EPSG:5070) and the
 lat/long are in NAD83 (EPSG:4269).</p>
-<pre class="r"><code>shade_coords &lt;- readRDS(&quot;./data/RShade Preprocessing/test/HUC0205/Output_0205.RDS&quot;) %&gt;% select(site_id) %&gt;% mutate(HUC = 0205) 
+<pre class="r"><code>shade_coords &lt;- readRDS(&quot;./data/RShade Preprocessing/HUC0205/Output_0205.RDS&quot;) %&gt;% select(site_id) %&gt;% mutate(HUC = 0205) 
 
 shade_coords &lt;- 
   rbind(
     shade_coords,
     rbind(
-      fread(&quot;./data/RShade Preprocessing/test/HUC0206/Output.csv&quot;) %&gt;% mutate(HUC = 0206),
-      fread(&quot;./data/RShade Preprocessing/test/HUC0207/Output.csv&quot;) %&gt;% mutate(HUC = 0207),
-      fread(&quot;./data/RShade Preprocessing/test/HUC0208/Output.csv&quot;) %&gt;% mutate(HUC = 0208)) %&gt;%
+      fread(&quot;./data/RShade Preprocessing/HUC0206/Output.csv&quot;) %&gt;% mutate(HUC = 0206),
+      fread(&quot;./data/RShade Preprocessing/HUC0207/Output.csv&quot;) %&gt;% mutate(HUC = 0207),
+      fread(&quot;./data/RShade Preprocessing/HUC0208/Output.csv&quot;) %&gt;% mutate(HUC = 0208)) %&gt;%
       select(HUC, site_id, geometry) %&gt;% 
       separate(geometry, into = c(&quot;X&quot;, &quot;Y&quot;), sep = &quot;,&quot;) %&gt;%
       mutate(X = as.numeric(gsub(&quot;[^0-9.]&quot;, &quot;&quot;, X)),

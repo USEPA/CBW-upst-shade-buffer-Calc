@@ -165,15 +165,15 @@ Import RShade preprocessing files.
 Note, the geometry is in NAD Conus Albers (EPSG:5070) and the lat/long are in NAD83 (EPSG:4269).
 
 ```{r, eval=F, warning=FALSE, message=FALSE}
-shade_coords <- readRDS("./data/RShade Preprocessing/test/HUC0205/Output_0205.RDS") %>% select(site_id) %>% mutate(HUC = 0205) 
+shade_coords <- readRDS("./data/RShade Preprocessing/HUC0205/Output_0205.RDS") %>% select(site_id) %>% mutate(HUC = 0205) 
 
 shade_coords <- 
   rbind(
     shade_coords,
     rbind(
-      fread("./data/RShade Preprocessing/test/HUC0206/Output.csv") %>% mutate(HUC = 0206),
-      fread("./data/RShade Preprocessing/test/HUC0207/Output.csv") %>% mutate(HUC = 0207),
-      fread("./data/RShade Preprocessing/test/HUC0208/Output.csv") %>% mutate(HUC = 0208)) %>%
+      fread("./data/RShade Preprocessing/HUC0206/Output.csv") %>% mutate(HUC = 0206),
+      fread("./data/RShade Preprocessing/HUC0207/Output.csv") %>% mutate(HUC = 0207),
+      fread("./data/RShade Preprocessing/HUC0208/Output.csv") %>% mutate(HUC = 0208)) %>%
       select(HUC, site_id, geometry) %>% 
       separate(geometry, into = c("X", "Y"), sep = ",") %>%
       mutate(X = as.numeric(gsub("[^0-9.]", "", X)),
