@@ -1,7 +1,7 @@
 ---
 title: "Upstream Shade Buffer Calculations for Regional Temperature Modeling"
 author: "Craig Connolly, EPA ORD-CEMM-ACESD, connolly.craig@epa.gov"
-date: "2025-June-3"
+date: "2025-June-20"
 output:
   html_document:
     df_print: paged
@@ -180,6 +180,14 @@ shade_coords <-
              Y = as.numeric(gsub("[^0-9.]", "", Y))) %>% 
       st_as_sf(coords = c("X", "Y"), crs = 5070) 
     )
+```
+
+<br/>
+
+FOR TEST: load in the example dataframes, otherwise skip.
+
+```{r, eval=F, warning=FALSE, message=FALSE}
+#load("./data/test_datasets.RData")
 ```
 
 <br/>
