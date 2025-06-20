@@ -2916,7 +2916,13 @@ shade_coords &lt;-
     )</code></pre>
 <p><br /></p>
 <p>FOR TEST: load in the example dataframes, otherwise skip.</p>
-<pre class="r"><code>#load(&quot;./data/test_datasets.RData&quot;)</code></pre>
+<pre class="r"><code>#load(&quot;./data/test_datasets.RData&quot;)
+
+#main_NHDFlowline &lt;-
+  #NHDFlowline %&gt;%
+  #left_join(NHDPlusFlowlineVAA %&gt;% select(c(divergence, nhdplusid, frommeas, tomeas, pathlength)), by = &quot;nhdplusid&quot;) %&gt;%
+  #filter(!divergence == 2) %&gt;%
+  #select(-c(divergence, line_row_id))</code></pre>
 <p><br /></p>
 </div>
 </div>

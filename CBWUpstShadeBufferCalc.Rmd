@@ -188,6 +188,12 @@ FOR TEST: load in the example dataframes, otherwise skip.
 
 ```{r, eval=F, warning=FALSE, message=FALSE}
 #load("./data/test_datasets.RData")
+
+#main_NHDFlowline <-
+  #NHDFlowline %>%
+  #left_join(NHDPlusFlowlineVAA %>% select(c(divergence, nhdplusid, frommeas, tomeas, pathlength)), by = "nhdplusid") %>%
+  #filter(!divergence == 2) %>%
+  #select(-c(divergence, line_row_id))
 ```
 
 <br/>
